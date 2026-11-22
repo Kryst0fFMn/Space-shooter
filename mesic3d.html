@@ -40,17 +40,23 @@
   const rnd = (a, b) => a + Math.random() * (b - a);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  scene.fog = new THREE.Fog(0x000000, 70, 150);
+  scene.fog = new THREE.Fog(0x04060e, 60, 150);
   const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 600);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
   renderer.setSize(innerWidth, innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  scene.add(new THREE.AmbientLight(0x7a82a8, 0.7));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.3);
-  sun.position.set(60, 80, 30);
-  scene.add(sun);
+  scene.add(new THREE.HemisphereLight(0x5f78c8, 0x2a2a34, 0.55));
+  const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
+  sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -45; sc.right = sc.top = 45; sc.near = 10; sc.far = 220;
+  sun.shadow.bias = -.0004; sun.shadow.normalBias = .05;
+  scene.add(sun, sun.target);
+  const rimL = new THREE.DirectionalLight(0x4f8cff, .8); rimL.position.set(-60, 30, -80); scene.add(rimL);
+  const flashL = new THREE.PointLight(0x66e6ff, 0, 14); scene.add(flashL);
 
   // ---------- Prostředí ----------
   const craters = [];
@@ -70,9 +76,17 @@
   const tg = new THREE.PlaneGeometry(260, 260, 130, 130);
   tg.rotateX(-Math.PI / 2);
   const tp = tg.attributes.position;
-  for (let i = 0; i < tp.count; i++) tp.setY(i, H(tp.getX(i), tp.getZ(i)));
+  const cols = [];
+  for (let i = 0; i < tp.count; i++) {
+    const x = tp.getX(i), z = tp.getZ(i), y = H(x, z);
+    tp.setY(i, y);
+    const v = .36 + Math.max(-.14, Math.min(.12, y * .05)) + Math.sin(x * .45) * Math.cos(z * .41) * .03;
+    cols.push(v, v * .985, v * 1.02);
+  }
+  tg.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
   tg.computeVertexNormals();
-  scene.add(new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: 0x8e909a, flatShading: true })));
+  const ground = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }));
+  ground.receiveShadow = true; scene.add(ground);
 
   const rockM = new THREE.MeshStandardMaterial({ color: 0x6c6e78, flatShading: true });
   for (let i = 0; i < 45; i++) {
@@ -80,7 +94,7 @@
     if (Math.hypot(x, z) < 8) continue;
     const r = new THREE.Mesh(new THREE.DodecahedronGeometry(rnd(.5, 1.6)), rockM);
     r.position.set(x, H(x, z) + .2, z);
-    r.rotation.set(rnd(0, 3), rnd(0, 3), 0);
+    r.rotation.set(rnd(0, 3), rnd(0, 3), 0); r.castShadow = r.receiveShadow = true;
     scene.add(r);
   }
   const sp = [];
@@ -91,44 +105,95 @@
   const earth = new THREE.Mesh(new THREE.SphereGeometry(40, 32, 32), new THREE.MeshBasicMaterial({ color: 0x3a7bd5, fog: false }));
   earth.position.set(-220, 160, -330);
   scene.add(earth);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(46, 32, 32), new THREE.MeshBasicMaterial({ color: 0x6fb4ff, transparent: true, opacity: .18, blending: THREE.AdditiveBlending, fog: false, depthWrite: false }));
+  glow.position.copy(earth.position); scene.add(glow);
 
   // ---------- Astronaut ----------
-  const white = new THREE.MeshStandardMaterial({ color: 0xf2f4f8 });
-  const box = (w, h, d, m, x, y, z, par) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); par.add(o); return o; };
+  const mat = (c, r = .6, m = 0, e = 0, ei = 1) => { const x = new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m }); if (e) { x.emissive = new THREE.Color(e); x.emissiveIntensity = ei; } x.userData.e = e; return x; };
+  const mesh = (g, m, x, y, z, par) => { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); par.add(o); return o; };
+  const BX = (w, h, d) => new THREE.BoxGeometry(w, h, d), SP = (r, s = 16) => new THREE.SphereGeometry(r, s, s), CY = (a, b, h, s = 12) => new THREE.CylinderGeometry(a, b, h, s), CO = (r, h, s = 6) => new THREE.ConeGeometry(r, h, s), DO = r => new THREE.DodecahedronGeometry(r, 0);
+  const suit = mat(0xeef0f6, .5, .05), grey = mat(0x6b7283, .35, .8), dark = mat(0x1f2433, .6, .3), orange = mat(0xff7a1a, .5, .1), cyan = mat(0x0a2a33, .3, 0, 0x35e6ff, 2.2), gold = mat(0x120d03, .06, 1, 0x5a3b00, .9);
   const P = new THREE.Group();
-  box(.9, 1.1, .55, white, 0, 1.5, 0, P);
-  box(.7, .9, .35, new THREE.MeshStandardMaterial({ color: 0xc4c8d4 }), 0, 1.55, -.45, P);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(.44, 16, 16), white); head.position.y = 2.4; P.add(head);
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(.34, 16, 16), new THREE.MeshStandardMaterial({ color: 0x10131f, roughness: .2, metalness: .6 }));
-  visor.scale.z = .6; visor.position.set(0, 2.42, .26); P.add(visor);
-  const legs = [-1, 1].map(s => { const g = new THREE.Group(); g.position.set(s * .22, 1, 0); box(.32, .95, .32, white, 0, -.45, 0, g); P.add(g); return g; });
-  box(.25, .8, .25, white, -.6, 1.6, 0, P);
-  box(.25, .7, .25, white, .6, 1.75, .25, P).rotation.x = -1.1;
-  box(.15, .2, .9, new THREE.MeshStandardMaterial({ color: 0x2b3042 }), .5, 1.75, .7, P);
+  mesh(BX(.95, 1.05, .6), suit, 0, 1.55, 0, P);
+  mesh(BX(.55, .42, .1), dark, 0, 1.72, .3, P);
+  [[-.15, cyan], [0, orange], [.15, cyan]].forEach(([x, m]) => mesh(BX(.09, .09, .05), m, x, 1.76, .36, P));
+  mesh(BX(1.02, .16, .66), grey, 0, 1.02, 0, P); mesh(BX(.86, .3, .56), suit, 0, .9, 0, P);
+  mesh(CY(.34, .38, .16), grey, 0, 2.14, 0, P);
+  mesh(SP(.5, 24), suit, 0, 2.55, 0, P);
+  mesh(SP(.4, 24), gold, 0, 2.54, .22, P).scale.set(1, .85, .62);
+  mesh(new THREE.TorusGeometry(.37, .045, 8, 28), grey, 0, 2.54, .33, P).scale.y = .85;
+  [-1, 1].forEach(s => { mesh(BX(.1, .12, .16), cyan, s * .46, 2.62, .12, P); mesh(SP(.17), suit, s * .66, 1.98, 0, P); mesh(CY(.17, .17, .06), orange, s * .66, 1.98, 0, P).rotation.z = Math.PI / 2; mesh(CY(.17, .17, .95), suit, s * .22, 1.7, -.82, P); mesh(CY(.18, .18, .1), orange, s * .22, 2.2, -.82, P); });
+  mesh(CY(.02, .02, .45, 6), grey, .32, 3.0, -.15, P); mesh(SP(.05, 8), mat(0xff2020, .3, 0, 0xff2020, 3), .32, 3.24, -.15, P);
+  mesh(BX(.8, 1, .4), grey, 0, 1.6, -.5, P);
+  function arm(s, rx, rz) { const a = new THREE.Group(); a.position.set(s * .62, 2.0, 0); mesh(CY(.13, .12, .55), suit, 0, -.28, 0, a); mesh(SP(.13), grey, 0, -.56, 0, a); mesh(CY(.12, .1, .5), suit, 0, -.84, 0, a); mesh(SP(.15), dark, 0, -1.12, 0, a); a.rotation.set(rx, 0, rz); P.add(a); }
+  arm(-1, -.5, -.15); arm(1, -1.4, 0);
+  const gun = new THREE.Group(); gun.position.set(.62, 1.8, 1.0); P.add(gun);
+  mesh(BX(.16, .22, .7), dark, 0, 0, 0, gun); mesh(BX(.1, .22, .12), grey, 0, -.2, -.1, gun);
+  mesh(CY(.045, .045, .7), grey, 0, .02, .6, gun).rotation.x = Math.PI / 2;
+  mesh(BX(.1, .1, .3), cyan, 0, .13, .05, gun); mesh(CY(.07, .07, .08), orange, 0, .02, .97, gun).rotation.x = Math.PI / 2;
+  const legs = [-1, 1].map(s => { const h = new THREE.Group(); h.position.set(s * .24, 1.05, 0); mesh(CY(.17, .15, .45), suit, 0, -.225, 0, h); mesh(SP(.16), grey, 0, -.45, 0, h); const k = new THREE.Group(); k.position.y = -.45; h.add(k); mesh(CY(.15, .13, .45), suit, 0, -.225, 0, k); mesh(BX(.3, .18, .46), dark, 0, -.52, .06, k); mesh(BX(.33, .06, .5), orange, 0, -.6, .06, k); h.userData.k = k; P.add(h); return h; });
+  P.traverse(o => o.isMesh && (o.castShadow = true));
   scene.add(P);
 
   // ---------- Příšery ----------
   const TYPES = {
-    crawler: { c: 0x3ddc5a, s: 1,   hp: 2,  sp: 3.4, dmg: 8,  pts: 10 },
-    runner:  { c: 0xc6f03a, s: .6,  hp: 1,  sp: 7,   dmg: 5,  pts: 15 },
-    spitter: { c: 0xb36bff, s: 1,   hp: 3,  sp: 2.6, dmg: 0,  pts: 25 },
-    brute:   { c: 0xff6a4d, s: 1.9, hp: 12, sp: 2.1, dmg: 22, pts: 60 },
+    crawler: { c: 0x38c954, s: 1,    hp: 2,  sp: 3.4, dmg: 8,  pts: 10, cy: 1.05, r: 1.35 },
+    runner:  { c: 0xd6a21a, s: .85,  hp: 1,  sp: 7.5, dmg: 6,  pts: 15, cy: .65,  r: 1.3 },
+    spitter: { c: 0x8a4dff, s: 1,    hp: 3,  sp: 2.6, dmg: 0,  pts: 25, cy: 1.8,  r: 1.4, hover: 1.2 },
+    brute:   { c: 0xff5a1a, s: 1.35, hp: 14, sp: 2.0, dmg: 22, pts: 60, cy: 2.7,  r: 2.1 },
   };
-  const eyeM = new THREE.MeshBasicMaterial({ color: 0xffffff }), blk = new THREE.MeshBasicMaterial({ color: 0x111111 });
   function mkAlien(type) {
-    const T = TYPES[type], g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: T.c, flatShading: true });
-    const b = new THREE.Mesh(new THREE.SphereGeometry(.9, 14, 12), mat); b.position.y = 1; b.scale.y = .9; body.add(b);
-    [-1, 1].forEach(s => {
-      const e = new THREE.Mesh(new THREE.SphereGeometry(.2, 8, 8), eyeM); e.position.set(s * .33, 1.3, .72); body.add(e);
-      const p = new THREE.Mesh(new THREE.SphereGeometry(.09, 8, 8), blk); p.position.set(s * .33, 1.3, .9); body.add(p);
-      const a = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, .9), mat); a.position.set(s * .55, 2.1, 0); a.rotation.z = -s * .45; body.add(a);
-      const t = new THREE.Mesh(new THREE.SphereGeometry(.11, 8, 8), type === 'spitter' ? eyeM : mat); t.position.set(s * .75, 2.5, 0); body.add(t);
-    });
-    box(.7, .24, .1, blk, 0, .75, .82, body);
-    for (let i = 0; i < 4; i++) box(.1, .13, .06, eyeM, -.27 + i * .18, .8, .88, body);
-    g.add(body);
+    const T = TYPES[type], g = new THREE.Group(), body = new THREE.Group(), mats = [], parts = []; g.add(body);
+    const M = (...a) => { const x = mat(...a); mats.push(x); return x; };
+    const eyeW = M(0xffffff, .2, 0, 0xffffff, .3), blk = M(0x0a0a0a, .3);
+    let anim;
+    if (type === 'crawler') { // zelená chlupatá bublina s tesáky a šesti nohama
+      const sk = M(0x38c954, .7), dk = M(0x1d7a32, .85), tooth = M(0xfff2cc, .4), mouth = M(0x3a0612, .9), tip = M(0x333300, .3, 0, 0xffee55, 2.5);
+      mesh(SP(.95, 20), sk, 0, 1.05, 0, body).scale.set(1.05, .9, 1);
+      for (let i = 0; i < 7; i++) { const a = i * .9; mesh(SP(.17, 8), dk, Math.cos(a) * .55, 1.55 + Math.sin(i) * .1, Math.sin(a) * .5 - .2, body); }
+      mesh(SP(.5, 14), mouth, 0, .82, .66, body).scale.set(1.25, .6, .5);
+      for (let i = 0; i < 5; i++) { const x = -.4 + i * .2; mesh(CO(.07, .22), tooth, x, .98, .86, body).rotation.x = Math.PI; mesh(CO(.07, .2), tooth, x, .66, .84, body); }
+      [-1, 1].forEach(s => { mesh(SP(.2, 12), eyeW, s * .38, 1.42, .74, body); mesh(SP(.09, 8), blk, s * .38, 1.42, .92, body); mesh(CY(.04, .04, .95, 6), dk, s * .5, 2.1, -.05, body).rotation.z = -s * .4; mesh(SP(.12, 8), tip, s * .72, 2.52, -.05, body); });
+      for (let i = 0; i < 6; i++) { const s = i % 2 ? 1 : -1, l = new THREE.Group(); l.position.set(s * .75, .55, -.5 + (i >> 1) * .5); mesh(CY(.09, .04, .95, 6), dk, s * .45, 0, 0, l).rotation.z = Math.PI / 2; l.userData.s = s; body.add(l); parts.push(l); }
+      anim = t => parts.forEach((l, i) => l.rotation.z = -l.userData.s * (.7 + Math.sin(t * 11 + i * 1.7) * .3));
+    } else if (type === 'runner') { // nízký rychlý brouk s čepelemi
+      const sh = M(0xd6a21a, .3, .5), dk = M(0x2e2006, .6), glow = M(0x401000, .3, 0, 0xff3010, 2.5), blade = M(0xe8e8f0, .15, 1);
+      mesh(SP(.6, 16), sh, 0, .72, -.55, body).scale.set(.85, .6, 1.7);
+      for (let i = 0; i < 4; i++) mesh(BX(.95 - i * .08, .06, .12), dk, 0, .98, -.2 - i * .38, body);
+      mesh(SP(.42, 14), sh, 0, .78, .5, body).scale.set(1, .75, 1.2);
+      mesh(SP(.3, 12), sh, 0, .72, 1.1, body).scale.set(1, .85, 1);
+      [-1, 1].forEach(s => {
+        mesh(SP(.11, 8), glow, s * .17, .8, 1.3, body); mesh(CO(.06, .35), dk, s * .13, .55, 1.4, body).rotation.x = Math.PI / 2;
+        const bl = new THREE.Group(); bl.position.set(s * .38, .85, 1.0); mesh(BX(.07, .07, .8), sh, 0, 0, .35, bl); mesh(BX(.03, .28, .6), blade, 0, -.12, .55, bl); bl.rotation.y = -s * .25; body.add(bl);
+      });
+      for (let i = 0; i < 6; i++) { const s = i % 2 ? 1 : -1, l = new THREE.Group(); l.position.set(s * .3, .75, .75 - (i >> 1) * .5); mesh(CY(.03, .02, 1.2, 5), dk, s * .6, 0, 0, l).rotation.z = Math.PI / 2; l.userData.s = s; body.add(l); parts.push(l); }
+      anim = t => parts.forEach((l, i) => l.rotation.set(0, Math.sin(t * 20 + i * 2.1) * .45, -l.userData.s * .9));
+    } else if (type === 'spitter') { // levitující medúza s chapadly
+      const dm = M(0x8a4dff, .25, .1, 0x2a0a60, .8), core = M(0x200020, .3, 0, 0xff3df2, 3), eye = M(0x222200, .3, 0, 0xffe94a, 2.5), ten = M(0x6a35c8, .5);
+      dm.transparent = true; dm.opacity = .88;
+      mesh(new THREE.SphereGeometry(.95, 22, 14, 0, Math.PI * 2, 0, Math.PI / 2), dm, 0, 1.75, 0, body).scale.y = .95;
+      mesh(CY(.95, .8, .14, 20), ten, 0, 1.75, 0, body);
+      mesh(SP(.36, 14), core, 0, 1.85, 0, body);
+      for (let i = 0; i < 6; i++) { const a = i * 1.047; mesh(SP(.09, 8), core, Math.cos(a) * .75, 2.05 + (i % 2) * .12, Math.sin(a) * .75, body); }
+      [-1, 1].forEach(s => mesh(SP(.13, 10), eye, s * .35, 1.95, .88, body));
+      for (let i = 0; i < 9; i++) { const a = i * .698, q = new THREE.Group(); q.position.set(Math.cos(a) * .6, 1.72, Math.sin(a) * .6); mesh(CY(.08, .02, 1.7, 6), ten, 0, -.85, 0, q); mesh(SP(.06, 6), core, 0, -1.7, 0, q); body.add(q); parts.push(q); }
+      anim = t => parts.forEach((q, i) => q.rotation.set(Math.sin(t * 3 + i) * .35, 0, Math.cos(t * 2.4 + i * 1.3) * .35));
+    } else { // obří kamenný golem s lávovými trhlinami
+      const rk = M(0x3b3d48, .95, .1), rk2 = M(0x262833, .95), lv = M(0x300600, .4, 0, 0xff4a0a, 2.4);
+      mesh(DO(.95), rk, 0, 2.1, 0, body).scale.set(1.25, 1.2, .9);
+      mesh(DO(.6), rk2, 0, 1.3, 0, body); mesh(DO(.42), rk, 0, 3.05, .15, body);
+      [-.18, .18].forEach(x => mesh(BX(.16, .07, .06), lv, x, 3.08, .52, body));
+      [[-.3, 0], [.25, .4], [0, -.35]].forEach(([x, r]) => mesh(BX(.07, .75, .05), lv, x, 2.1, .83, body).rotation.z = r);
+      [-1, 1].forEach(s => {
+        mesh(CO(.22, .7, 5), rk2, s * .95, 3.0, 0, body).rotation.z = -s * .5;
+        const a = new THREE.Group(); a.position.set(s * 1.3, 2.6, 0); mesh(DO(.42), rk, 0, -.5, 0, a).scale.y = 1.5; mesh(BX(.55, .08, .55), lv, 0, -.95, 0, a); mesh(DO(.55), rk2, 0, -1.5, 0, a); a.userData = { s, k: 'a' }; body.add(a); parts.push(a);
+        const l = new THREE.Group(); l.position.set(s * .5, 1.1, 0); mesh(CY(.3, .38, 1.0, 6), rk2, 0, -.5, 0, l); mesh(BX(.65, .25, .9), rk, 0, -1.0, .12, l); l.userData = { s, k: 'l' }; body.add(l); parts.push(l);
+      });
+      anim = t => parts.forEach(p => p.rotation.x = Math.sin(t * 3.5) * (p.userData.k === 'a' ? -1 : 1) * p.userData.s * .5);
+    }
     g.scale.setScalar(T.s);
-    return { g, body, mat, type, T, hp: T.hp, cd: rnd(0, 1), flash: 0, ph: rnd(0, 6) };
+    g.traverse(o => o.isMesh && (o.castShadow = true));
+    return { g, body, mats, anim, type, T, hp: T.hp, cd: rnd(0, 1), flash: 0, ph: rnd(0, 6) };
   }
 
   // ---------- Stav hry ----------
@@ -195,13 +260,13 @@
   // ---------- Střelba ----------
   const fwd = new THREE.Vector3(), tmp = new THREE.Vector3();
   function shoot() {
-    const muzzle = new THREE.Vector3(Math.cos(yaw) * .5 - Math.sin(yaw) * .9, 1.75, -Math.sin(yaw) * .5 - Math.cos(yaw) * .9).add(pl.p);
+    const muzzle = new THREE.Vector3(Math.cos(yaw) * .62 - Math.sin(yaw) * 1.5, 1.8, -Math.sin(yaw) * .62 - Math.cos(yaw) * 1.5).add(pl.p);
     const aim = camera.position.clone().addScaledVector(fwd, 60);
     const v = aim.sub(muzzle).normalize().multiplyScalar(65);
-    const m = new THREE.Mesh(new THREE.SphereGeometry(.14, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+    const m = new THREE.Mesh(new THREE.SphereGeometry(.14, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7df4ff }));
     m.position.copy(muzzle); scene.add(m);
     list.bu.push({ m, v, life: 2 });
-    pl.cd = .16;
+    pl.cd = .16; flashL.position.copy(muzzle); flashL.intensity = 8;
   }
 
   // ---------- Update ----------
@@ -225,6 +290,7 @@
       pl.walk += moving ? dt * 10 : 0;
       legs[0].rotation.x = moving ? Math.sin(pl.walk) * .7 : 0;
       legs[1].rotation.x = moving ? -Math.sin(pl.walk) * .7 : 0;
+      legs.forEach((l, i) => l.userData.k.rotation.x = moving ? Math.max(0, Math.sin(pl.walk + (i ? Math.PI : 0) + 1)) * .9 : 0);
       pl.cd -= dt;
       if (firing && pl.cd <= 0) shoot();
 
@@ -250,12 +316,12 @@
           }
         }
         p.x += d.x * e.T.sp * dir * dt; p.z += d.z * e.T.sp * dir * dt;
-        p.y = H(p.x, p.z) + Math.abs(Math.sin(t * 6 + e.ph)) * .25 * e.T.s;
+        p.y = H(p.x, p.z) + Math.abs(Math.sin(t * 6 + e.ph)) * .25 * e.T.s + (e.T.hover || 0);
         e.g.rotation.y = Math.atan2(d.x, d.z);
-        e.body.rotation.z = Math.sin(t * 5 + e.ph) * .08;
+        e.body.rotation.z = e.type === 'crawler' ? Math.sin(t * 5 + e.ph) * .08 : 0; if (e.anim) e.anim(t);
         e.cd -= e.type === 'spitter' ? 0 : dt;
         if (e.T.dmg && dist < 1.3 * e.T.s + .8 && e.cd <= 0) { e.cd = 1; hurt(e.T.dmg); }
-        if (e.flash > 0) { e.flash -= dt; e.mat.emissive.setHex(e.flash > 0 ? 0xffffff : 0); }
+        if (e.flash > 0) { e.flash -= dt; e.mats.forEach(m => m.emissive.setHex(e.flash > 0 ? 0xffffff : m.userData.e)); }
       }
 
       // střely hráče
@@ -264,7 +330,7 @@
         if (b.m.position.y < H(b.m.position.x, b.m.position.z)) b.life = 0;
         for (const e of list.en) {
           const c = e.g.position;
-          if (b.m.position.distanceTo(tmp.set(c.x, c.y + e.T.s, c.z)) < 1.05 * e.T.s + .2) {
+          if (b.m.position.distanceTo(tmp.set(c.x, c.y + e.T.cy, c.z)) < e.T.r) {
             b.life = 0; e.hp--; e.flash = .08;
             if (e.hp <= 0) { e.dead = true; G.score += e.T.pts; burst(tmp, e.T.c, 14); }
             break;
@@ -286,7 +352,7 @@
     list.pa = list.pa.filter(p => { if (p.life <= 0) scene.remove(p.m); return p.life > 0; });
 
     // postava + kamera za zády
-    P.position.copy(pl.p);
+    P.position.copy(pl.p); sun.position.set(pl.p.x + 50, pl.p.y + 70, pl.p.z + 25); sun.target.position.copy(pl.p); sun.target.updateMatrixWorld();
     P.rotation.y = yaw + Math.PI;
     const target = tmp.set(pl.p.x, pl.p.y + 2, pl.p.z).addScaledVector(right, .9);
     camera.position.copy(target).addScaledVector(fwd, -6.5);
@@ -317,7 +383,7 @@
 
   function loop(ms) {
     const dt = Math.min((ms - last) / 1000, .05); last = ms;
-    update(dt, ms / 1000);
+    update(dt, ms / 1000); flashL.intensity *= Math.pow(.0005, dt);
     renderer.render(scene, camera);
     requestAnimationFrame(loop);
   }
