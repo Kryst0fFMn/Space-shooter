@@ -13,6 +13,8 @@
   #boss { position: fixed; top: 64px; left: 50%; width: min(60%, 420px); height: 14px; margin-left: min(-30%, -210px); border: 2px solid #eef1ff; border-radius: 8px; overflow: hidden; background: #1b1030; display: none; pointer-events: none; }
   #bossHp { height: 100%; width: 100%; background: linear-gradient(90deg, #b62dff, #ff3da8); }
   #pw { position: fixed; bottom: 18px; width: 100%; text-align: center; color: #ffc23a; font-weight: bold; text-shadow: 0 1px 4px #000; pointer-events: none; }
+  #dash { position: fixed; bottom: 18px; left: 18px; width: 130px; height: 8px; border: 2px solid #eef1ff; border-radius: 6px; overflow: hidden; background: #1b1030; pointer-events: none; }
+  #dashBar { height: 100%; width: 100%; background: #35e6ff; }
   #cross { position: fixed; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 2px solid #fff; border-radius: 50%; opacity: .8; pointer-events: none; }
   #banner { position: fixed; top: 22%; width: 100%; text-align: center; font-size: clamp(2rem, 7vw, 4rem); font-weight: bold; opacity: 0; pointer-events: none; text-shadow: 0 2px 10px #000; transition: opacity .5s; }
   #msg { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(0,0,0,.72); text-align: center; cursor: pointer; padding: 20px; }
@@ -27,13 +29,14 @@
   <div style="text-align:center">Vlna <b id="wave">1</b><br>Zbývá nepřátel: <b id="left">0</b></div>
   <div style="text-align:right">Skóre: <b id="score">0</b></div>
 </div>
-<div id="boss"><div id="bossHp"></div></div><div id="pw"></div>
+<div id="boss"><div id="bossHp"></div></div><div id="pw"></div><div id="dash"><div id="dashBar"></div></div>
 <div id="cross"></div>
 <div id="banner"></div>
 <div id="msg">
   <h1 id="title">Měsíc 3D</h1>
   <p id="sub">Přežij vlny příšer na povrchu Měsíce.</p>
-  <p>WASD – pohyb · myš – rozhlížení · levé tlačítko – střelba · mezerník – skok · Esc – pauza</p>
+  <p>WASD pohyb · myš rozhlížení · levé tlačítko střelba · mezerník skok (ve vzduchu ještě jednou = dvojskok) · Shift dash</p>
+  <p>X / Y prohodí směr myši · M zapne či vypne hudbu · Esc pauza</p>
   <p>Sbírej svítící koule: zelená = zdraví, žlutá = trojitá střelba. Každá pátá vlna je boss.</p>
   <p><b>Klikni pro start</b></p>
 </div>
@@ -76,7 +79,7 @@
     if (AC) return;
     try {
       AC = new (window.AudioContext || window.webkitAudioContext)();
-      [55, 82.5].forEach((f, i) => { const o = AC.createOscillator(), g = AC.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.value = .02; o.connect(g).connect(AC.destination); o.start(); });
+      startMusic();
     } catch (e) { AC = null; }
   }
   function sfx(k) {
@@ -90,6 +93,51 @@
     else if (k === 'hurt') { noise(.25, .25, 500); tone(120, 50, .25, 'sawtooth', .12); }
     else if (k === 'pick') { tone(660, 1320, .25, 'sine', .1); tone(990, 1980, .3, 'sine', .05); }
     else if (k === 'wave') { tone(220, 440, .6, 'triangle', .12); tone(330, 660, .6, 'sine', .08); }
+    else if (k === 'dash') { noise(.22, .22, 2600); tone(300, 900, .18, 'sine', .05); }
+    else if (k === 'jump') tone(280, 620, .14, 'sine', .06);
+  }
+
+  // hudba: vlastní mp3 ve složce hudba/ (pokud existují), jinak generovaný drum & bass
+  let musGain = null, musOn = true, fileTracks = [], curFile = null;
+  function muteMusic() { musOn = !musOn; if (musGain) musGain.gain.value = musOn ? .55 : 0; if (curFile) curFile.volume = musOn ? .6 : 0; banner('Hudba: ' + (musOn ? 'zapnuta' : 'vypnuta')); }
+  function playFiles(i) { curFile = fileTracks[i % fileTracks.length]; curFile.volume = musOn ? .6 : 0; curFile.onended = () => playFiles(i + 1); curFile.play().catch(() => {}); }
+  function startMusic() {
+    musGain = AC.createGain(); musGain.gain.value = .55; musGain.connect(AC.destination);
+    Promise.all(['delirium', 'high-note', 'midnight-sound', 'guiding-light'].map(n => new Promise(res => { const a = new Audio('hudba/' + n + '.mp3'); a.preload = 'auto'; a.onloadedmetadata = () => res(a); a.onerror = () => res(null); setTimeout(() => res(null), 3000); })))
+      .then(l => { fileTracks = l.filter(Boolean); if (fileTracks.length) playFiles(0); else synthDnb(); });
+  }
+  function synthDnb() {
+    const ST = 60 / 174 / 4, nb = AC.createBuffer(1, AC.sampleRate, AC.sampleRate), nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    const out = (node, t, v, d, a = .003) => { const g = AC.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + a); g.gain.exponentialRampToValueAtTime(.0001, t + a + d); node.connect(g).connect(musGain); };
+    const nz = (t, v, d, type, fr) => { const sr = AC.createBufferSource(), fl = AC.createBiquadFilter(); sr.buffer = nb; fl.type = type; fl.frequency.value = fr; sr.connect(fl); out(fl, t, v, d); sr.start(t, Math.random() * .5, d + .05); };
+    const osc = (t, type, f0, f1, v, d) => { const o = AC.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + d); out(o, t, v, d); o.start(t); o.stop(t + d + .05); };
+    const kick = t => osc(t, 'sine', 160, 42, .9, .22);
+    const snare = (t, v) => { nz(t, v, .16, 'bandpass', 1900); osc(t, 'triangle', 230, 120, v * .6, .1); };
+    const hat = (t, v, d) => nz(t, v, d, 'highpass', 8000);
+    const bass = (t, f, len) => [-9, 9].forEach(dt => { const o = AC.createOscillator(), fl = AC.createBiquadFilter(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = dt; fl.type = 'lowpass'; fl.Q.value = 6; fl.frequency.setValueAtTime(200, t); fl.frequency.linearRampToValueAtTime(1100, t + len * .45); fl.frequency.linearRampToValueAtTime(250, t + len); o.connect(fl); out(fl, t, .16, len, .01); o.start(t); o.stop(t + len + .05); });
+    const pad = (t, notes, dur) => notes.forEach(f => { const o = AC.createOscillator(), fl = AC.createBiquadFilter(); o.type = 'triangle'; o.frequency.value = f; fl.type = 'lowpass'; fl.frequency.value = 1600; o.connect(fl); out(fl, t, .035, dur, .8); o.start(t); o.stop(t + dur + 1); });
+    const lead = (t, f) => { const o = AC.createOscillator(), fl = AC.createBiquadFilter(); o.type = 'sawtooth'; o.frequency.value = f; fl.type = 'lowpass'; fl.frequency.setValueAtTime(3000, t); fl.frequency.exponentialRampToValueAtTime(500, t + .2); o.connect(fl); out(fl, t, .04, .22); o.start(t); o.stop(t + .3); };
+    const TR = [
+      { r: 38, ch: [0, 3, 7, 10], b: [0, -1, -1, 0, -1, 0, 3, -1, -1, 0, -1, 5, -1, 3, -1, 7], ld: [12, 15, 19, 22, 19, 15] },
+      { r: 41, ch: [0, 4, 7, 11], b: [0, -1, 0, -1, -1, 7, -1, 5, 0, -1, -1, 0, -1, 4, -1, -1], ld: [12, 16, 19, 23, 19, 16] },
+      { r: 36, ch: [0, 3, 7, 10], b: [0, 0, -1, -1, 5, -1, -1, 3, -1, 0, -1, -1, 7, -1, 5, -1], ld: [15, 19, 22, 27, 22, 19] },
+      { r: 43, ch: [0, 4, 7, 9], b: [0, -1, -1, 7, -1, -1, 5, -1, 0, -1, 4, -1, -1, 2, -1, -1], ld: [12, 16, 19, 21, 19, 16] },
+    ];
+    const play = (n, t) => {
+      const bar = Math.floor(n / 16), s = n % 16, tr = TR[Math.floor(bar / 24) % 4], sc = bar % 24, dr = sc >= 2 && !(sc === 23 && s >= 8);
+      if (dr && (s === 0 || s === 10 || (bar % 4 === 3 && s === 7))) kick(t);
+      if (dr && (s === 4 || s === 12)) snare(t, .5);
+      if (dr && bar % 4 === 3 && s >= 13) snare(t, .22);
+      if (dr && (s === 7 || s === 14) && sc >= 4) snare(t, .12);
+      if (s % 2 === 0) hat(t, .07, s % 4 === 2 ? .1 : .035); else if (sc >= 4) hat(t, .03, .03);
+      if (sc >= 2 && tr.b[s] >= 0) bass(t, hz(tr.r + tr.b[s]), ST * 2.4);
+      if (s === 0 && bar % 2 === 0) pad(t, tr.ch.map(c => hz(tr.r + 24 + c)), ST * 32);
+      if (sc >= 12 && sc < 22 && s % 2 === 0) lead(t, hz(tr.r + 36 + tr.ld[(s / 2 + bar) % 6]));
+    };
+    let n = 0, nxt = AC.currentTime + .15;
+    setInterval(() => { while (nxt < AC.currentTime + .25) { play(n++, nxt); nxt += ST; } }, 50);
   }
 
   // barvy a svět
@@ -123,17 +171,53 @@
   craters.forEach((c, i) => { const m = new THREE.Mesh(new THREE.CircleGeometry(c.r * .74, 32), glowM[i % 5]); m.rotation.x = -Math.PI / 2; m.position.set(c.x, H(c.x, c.z) + c.r * .165, c.z); scene.add(m); });
 
   function spot(minR = 10) { for (let k = 0; k < 20; k++) { const x = rnd(-112, 112), z = rnd(-112, 112); if (Math.hypot(x, z) < minR) continue; if (craters.some(c => Math.hypot(x - c.x, z - c.z) < c.r * 1.15)) continue; return [x, H(x, z), z]; } return null; }
-  // stromy
-  const barkM = mat(0x2a1838, .9), capMs = PAL.slice(0, 4).map(c => mat(c, .5, 0, c, .35));
-  for (let i = 0; i < 34; i++) {
+  // platformy, na které se dá skákat
+  const plats = [], V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+  const addPlat = (x, z, r, top, bottom, solid, sr) => plats.push({ x, z, r, top, bottom, solid, sr: sr || r });
+  function floorAt(x, z, y, vy) { let b = H(x, z); if (vy <= 0) for (const p of plats) if (p.top > b && p.top <= y + .35 && Math.hypot(x - p.x, z - p.z) < p.r) b = p.top; return b; }
+  function solidPush(pos, y) { for (const p of plats) { if (!p.solid) continue; const dx = pos.x - p.x, dz = pos.z - p.z, d = Math.hypot(dx, dz), sr = p.sr + .45; if (d < sr && y < p.top - .3 && y > p.bottom - 6) { if (d > .001) { pos.x = p.x + dx / d * sr; pos.z = p.z + dz / d * sr; } else pos.x += sr; } } }
+  const barkM = mat(0x2a1838, .9), capMs = PAL.slice(0, 4).map(c => mat(c, .5, 0, c, .35)), rockM = [0x3a2f66, 0x2d4a63, 0x5a2f66].map(c => mat(c, .85, .05));
+  // běžné stromy (půjde na ně vyskočit)
+  for (let i = 0; i < 30; i++) {
     const p = spot(12); if (!p) continue;
-    const h = rnd(5, 10), g = new THREE.Group(), bx = rnd(-1.6, 1.6), bz = rnd(-1.6, 1.6);
-    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0, 0), new THREE.Vector3(bx * .4, h * .4, bz * .4), new THREE.Vector3(bx, h * .75, bz), new THREE.Vector3(bx * .7, h, bz * .7)]);
+    const h = rnd(6, 12), g = new THREE.Group(), bx = rnd(-1.6, 1.6), bz = rnd(-1.6, 1.6), rr = rnd(2.2, 3.2);
+    const curve = new THREE.CatmullRomCurve3([V3(0, 0, 0), V3(bx * .4, h * .4, bz * .4), V3(bx, h * .75, bz), V3(bx * .7, h, bz * .7)]);
     mesh(new THREE.TubeGeometry(curve, 14, rnd(.25, .45), 8), barkM, 0, 0, 0, g).castShadow = true;
     mesh(SP(.7, 10), barkM, 0, .2, 0, g).scale.y = .6;
-    const cp = mesh(SP(rnd(1.8, 3), 20), capMs[i % 4], bx * .7, h + .2, bz * .7, g); cp.scale.y = .38; cp.castShadow = true;
-    for (let j = 0; j < 4; j++) { const a = j * 1.6 + i; mesh(SP(.28, 10), glowM[(i + j) % 5], bx * .7 + Math.cos(a) * 1.8, h - .3 - rnd(0, 1), bz * .7 + Math.sin(a) * 1.8, g); }
-    g.position.set(...p); g.rotation.y = rnd(0, 6.28); scene.add(g);
+    const cp = mesh(SP(rr, 20), capMs[i % 4], bx * .7, h + .2, bz * .7, g); cp.scale.y = .38; cp.castShadow = true;
+    for (let j = 0; j < 4; j++) { const a = j * 1.6 + i; mesh(SP(.28, 10), glowM[(i + j) % 5], bx * .7 + Math.cos(a) * rr * .8, h - .3 - rnd(0, 1), bz * .7 + Math.sin(a) * rr * .8, g); }
+    g.position.set(...p); scene.add(g);
+    addPlat(p[0] + bx * .7, p[2] + bz * .7, rr * .9, p[1] + h + .2 + rr * .36, p[1] + h - 1, false);
+    addPlat(p[0], p[2], .55, p[1] + h * .4, p[1] - 6, true, .5);
+  }
+  // vysoké stromy se schodištěm výběžků kolem kmene
+  for (let i = 0; i < 9; i++) {
+    const p = spot(16); if (!p) continue;
+    const h = rnd(16, 22), g = new THREE.Group(), tr = rnd(.7, 1), cr = rnd(4.2, 5.2);
+    const curve = new THREE.CatmullRomCurve3([V3(0, 0, 0), V3(rnd(-.4, .4), h * .35, rnd(-.4, .4)), V3(rnd(-.5, .5), h * .7, rnd(-.5, .5)), V3(0, h, 0)]);
+    mesh(new THREE.TubeGeometry(curve, 24, tr, 10), barkM, 0, 0, 0, g).castShadow = true;
+    mesh(SP(1.3, 12), barkM, 0, .3, 0, g).scale.y = .6;
+    const cp = mesh(SP(cr, 24), capMs[i % 4], 0, h + .3, 0, g); cp.scale.y = .3; cp.castShadow = true;
+    addPlat(p[0], p[2], cr * .92, p[1] + h + .3 + cr * .29, p[1] + h - 1, false);
+    addPlat(p[0], p[2], tr + .1, p[1] + h - 1.5, p[1] - 6, true, tr);
+    for (let k = 1; k * 3.4 < h - 2; k++) {
+      const a = k * 1.75 + i, lx = Math.cos(a) * 3.5, lz = Math.sin(a) * 3.5, y = k * 3.4;
+      mesh(SP(1.8, 14), capMs[(i + k) % 4], lx, y, lz, g).scale.set(1, .22, 1);
+      mesh(SP(.25, 8), glowM[(i + k) % 5], lx, y - .5, lz, g);
+      addPlat(p[0] + lx, p[2] + lz, 1.6, p[1] + y + .38, p[1] + y - .5, false);
+    }
+    g.position.set(...p); scene.add(g);
+  }
+  // skalní terasy (schody z mes)
+  for (let i = 0; i < 9; i++) {
+    const c = spot(22); if (!c) continue;
+    const a0 = rnd(0, 6.28), n = 3 + (i % 2);
+    for (let j = 0; j < n; j++) {
+      const px = c[0] + Math.cos(a0 + j * 1.3) * j * 3.3, pz = c[2] + Math.sin(a0 + j * 1.3) * j * 3.3, gy = H(px, pz), r = 4.4 - j * .7, top = c[1] + 2.7 * (j + 1), hg = top - gy + 4;
+      const m = mesh(new THREE.CylinderGeometry(r * .9, r * 1.1, hg, 14), rockM[(i + j) % 3], px, gy - 4 + hg / 2, pz, scene); m.castShadow = m.receiveShadow = true;
+      mesh(new THREE.TorusGeometry(r * .88, .07, 6, 24), glowM[(i + j) % 5], px, top + .03, pz, scene).rotation.x = Math.PI / 2;
+      addPlat(px, pz, r * .9, top, gy - 5, true, r);
+    }
   }
   // obří houby
   const capGeo = new THREE.LatheGeometry(Array.from({ length: 10 }, (_, i) => { const a = (1 - i / 9) * Math.PI / 2; return new THREE.Vector2(Math.sin(a), Math.cos(a) * .55); }), 20);
@@ -144,7 +228,7 @@
     mesh(CY(.18, .28, 1.4, 10), stemM, 0, .7 * sz, 0, g).scale.set(sz * .9, sz, sz * .9);
     const cp = mesh(capGeo, mcM[k], 0, 1.4 * sz, 0, g); cp.scale.setScalar(sz * 1.2); cp.castShadow = true;
     mesh(new THREE.CircleGeometry(1, 20), glowM[k], 0, 1.38 * sz, 0, g).rotation.x = Math.PI / 2;
-    g.children[2].scale.setScalar(sz * 1.15);
+    g.children[2].scale.setScalar(sz * 1.15); if (sz > 1.2) addPlat(p[0], p[2], sz * .95, p[1] + 2.05 * sz, p[1] + sz, false);
     g.position.set(...p); scene.add(g);
   }
   // krystaly
@@ -209,7 +293,7 @@
   P.traverse(o => o.isMesh && (o.castShadow = true));
   scene.add(P);
   function animPlayer(dt, moving, t) {
-    const air = pl.p.y > H(pl.p.x, pl.p.z) + .08;
+    const air = pl.p.y > floorAt(pl.p.x, pl.p.z, pl.p.y, 0) + .08;
     pl.walk += moving ? dt * 10 : 0;
     const w = pl.walk, sw = moving ? Math.sin(w) : 0;
     legs.forEach((l, i) => { const ph = i ? Math.PI : 0; l.rotation.x = air ? (i ? -.4 : .5) : moving ? Math.sin(w + ph) * .75 : 0; l.userData.k.rotation.x = air ? .9 : moving ? Math.max(0, Math.sin(w + ph + 1.2)) : 0; });
@@ -225,13 +309,24 @@
     if (moving && !air && pl.dust <= 0) { pl.dust = .1; const m = new THREE.Mesh(partGeo, new THREE.MeshBasicMaterial({ color: 0xd9ccff, transparent: true })); m.position.set(pl.p.x + rnd(-.3, .3), pl.p.y + .1, pl.p.z + rnd(-.3, .3)); scene.add(m); list.pa.push({ m, v: new THREE.Vector3(rnd(-.6, .6), rnd(1, 2), rnd(-.6, .6)), life: .6 }); }
   }
 
+  const vm = new THREE.Group(); vm.position.set(.32, -.3, -.7); camera.add(vm); scene.add(camera);
+  { const vs = mat(0xeef0f6, .45, .05), vd = mat(0x1f2433, .6, .3), vg = mat(0x6b7283, .35, .8), vc = mat(0x0a2a33, .3, 0, 0x35e6ff, 2.2), vo = mat(0xff7a1a, .5, .1);
+    mesh(CAP(.045, .3, 10), vd, 0, 0, -.05, vm).rotation.x = Math.PI / 2;
+    mesh(CAP(.016, .3, 8), vg, 0, .01, -.36, vm).rotation.x = Math.PI / 2;
+    mesh(CAP(.02, .14, 8), vc, 0, .055, -.04, vm).rotation.x = Math.PI / 2;
+    mesh(SP(.03, 8), vo, 0, .01, -.52, vm); mesh(CAP(.025, .08, 8), vg, 0, -.08, .02, vm);
+    mesh(SP(.065, 12), vd, 0, -.09, .04, vm).scale.set(1, .8, 1.2);
+    mesh(CAP(.055, .35, 10), vs, .02, -.2, .3, vm).rotation.x = 1.15; }
+  // tělo astronauta je v první osobě neviditelné, ale pořád vrhá stín
+  P.traverse(o => { if (o.isMesh) { o.material.colorWrite = false; o.material.depthWrite = false; } });
+
   // ---------- Příšery ----------
   const TYPES = {
-    crawler: { c: 0x38c954, s: 1,    hp: 2,  sp: 3.4, dmg: 8,  pts: 10,  cy: 1.05, r: 1.35 },
-    runner:  { c: 0xd6a21a, s: .85,  hp: 1,  sp: 7.5, dmg: 6,  pts: 15,  cy: .65,  r: 1.3 },
-    spitter: { c: 0x8a4dff, s: 1,    hp: 3,  sp: 2.6, dmg: 0,  pts: 25,  cy: 1.8,  r: 1.4, hover: 1.2 },
-    brute:   { c: 0xff5a1a, s: 1.35, hp: 14, sp: 2.0, dmg: 22, pts: 60,  cy: 3.2,  r: 2.3 },
-    boss:    { c: 0xb62dff, s: 2.2,  hp: 70, sp: 2.3, dmg: 35, pts: 500, cy: 5.2,  r: 3.8 },
+    crawler: { c: 0x38c954, s: 1,    hp: 2,  sp: 3.4, dmg: 8,  pts: 10,  cy: 1.1, r: 1.2 },
+    runner:  { c: 0xd6a21a, s: .85,  hp: 1,  sp: 7.5, dmg: 6,  pts: 15,  cy: .65, r: 1.15 },
+    spitter: { c: 0x8a4dff, s: 1,    hp: 3,  sp: 2.6, dmg: 0,  pts: 25,  cy: 1.8, r: 1.25, hover: 1.2 },
+    brute:   { c: 0xff5a1a, s: 1.35, hp: 14, sp: 2.0, dmg: 22, pts: 60,  cy: 3.2, r: 2.05 },
+    boss:    { c: 0xb62dff, s: 2.2,  hp: 70, sp: 2.3, dmg: 35, pts: 500, cy: 5.2, r: 3.4 },
   };
   function chain(par, n, len, r0, r1, m) { const gs = []; let p = par; for (let i = 0; i < n; i++) { const g = new THREE.Group(); g.position.y = i ? -len : 0; p.add(g); mesh(CAP(r0 + (r1 - r0) * i / n, len * .7, 8), m, 0, -len / 2, 0, g); gs.push(g); p = g; } return gs; }
   const wave = (gs, t, a, sp) => gs.forEach((q, i) => q.rotation.set(Math.sin(t * sp - i * .7) * a, 0, Math.cos(t * sp * .8 - i * .6) * a));
@@ -289,7 +384,7 @@
       const boss = type === 'boss';
       const rk = M(boss ? 0x2a1840 : 0x3b3d48, .9, .1), rk2 = M(boss ? 0x1a0e2a : 0x262833, .9), lv = M(0x300600, .4, 0, boss ? 0xc43bff : 0xff4a0a, 2.4);
       const torso = new THREE.Group(); torso.position.y = 2.35; body.add(torso);
-      mesh(ICO(.95), rk, 0, 0, 0, torso).scale.set(1.25, 1.15, .95);
+      mesh(ICO(.95), rk, 0, 0, 0, torso).scale.set(1.0, 1.25, .8);
       mesh(SP(.38, 16), lv, 0, .1, .75, torso); mesh(new THREE.TorusGeometry(.5, .09, 8, 20), rk2, 0, .1, .78, torso);
       mesh(ICO(.6), rk2, 0, -.85, 0, torso).scale.set(1.1, .7, .9);
       const head = new THREE.Group(); head.position.set(0, 1.1, .15); torso.add(head);
@@ -307,6 +402,7 @@
       });
       anim = t => { t += ph; const w = t * 3.2; torso.rotation.x = .08 + Math.sin(w * 2) * .03; torso.position.y = 2.35 + Math.abs(Math.sin(w)) * .08; torso.rotation.y = Math.sin(w) * .12; head.rotation.y = Math.sin(t * .9) * .3; lv.emissiveIntensity = 2.2 + Math.sin(t * 4) * .9; lgs.forEach(l => { l.h.rotation.x = Math.sin(w + (l.s > 0 ? Math.PI : 0)) * .55; l.k.rotation.x = Math.max(0, Math.sin(w + (l.s > 0 ? Math.PI : 0) + 1.2)) * .8; }); arms.forEach(o => { o.a.rotation.x = -Math.sin(w + (o.s > 0 ? 0 : Math.PI)) * .5; o.el.rotation.x = -.3 - Math.max(0, Math.sin(w + (o.s > 0 ? 0 : Math.PI))) * .5; }); };
     }
+    body.scale.set(...({ crawler: [.72, 1.12, .78], runner: [.8, 1, .85], spitter: [.8, 1.05, .8], brute: [.78, 1.02, .8], boss: [.8, 1.02, .82] }[type]));
     g.scale.setScalar(.01);
     g.traverse(o => o.isMesh && (o.castShadow = true));
     return { g, body, mats, anim, type, T, hp: T.hp, cd: rnd(0, 1), flash: 0, ph, born: 0 };
@@ -314,7 +410,7 @@
 
   // ---------- Stav hry ----------
   let G, yaw = 0, pitch = .05, keys = {}, firing = false, last = 0, locked = false;
-  const pl = { p: new THREE.Vector3(), vy: 0, cd: 0, walk: 0, recoil: 0, dust: 0 };
+  const pl = { p: new THREE.Vector3(), vy: 0, cd: 0, walk: 0, recoil: 0, dust: 0, dashCd: 0, dashT: 0, dashDir: new THREE.Vector3(), jumps: 0, jumpHeld: false, shiftHeld: false, moving: false };
   const list = { en: [], bu: [], sh: [], pa: [], pk: [] };
 
   function clear() { Object.values(list).forEach(l => l.forEach(o => scene.remove(o.g || o.m))); Object.keys(list).forEach(k => list[k] = []); }
@@ -350,6 +446,7 @@
     $('score').textContent = G.score;
     $('left').textContent = list.en.length + G.queue.length;
     const bo = list.en.find(e => e.type === 'boss'); $('boss').style.display = bo ? 'block' : 'none'; if (bo) $('bossHp').style.width = (100 * bo.hp / bo.T.hp) + '%';
+    $('dashBar').style.width = (100 * (1 - pl.dashCd / 1.1)) + '%';
     $('pw').textContent = G.power > 0 ? 'Trojitá střelba: ' + Math.ceil(G.power) + ' s' : '';
   }
   function spawn(type) {
@@ -380,7 +477,7 @@
   const bulletGeo = CAP(.07, .5, 8); bulletGeo.rotateX(Math.PI / 2);
   const bulletMat = new THREE.MeshBasicMaterial({ color: 0x7df4ff });
   function shoot() {
-    const muzzle = new THREE.Vector3(Math.cos(yaw) * .64 - Math.sin(yaw) * 1.6, 1.8, -Math.sin(yaw) * .64 - Math.cos(yaw) * 1.6).add(pl.p);
+    camera.updateMatrixWorld(); const muzzle = camera.localToWorld(new THREE.Vector3(.32, -.28, -1.25));
     const base = camera.position.clone().addScaledVector(fwd, 60).sub(muzzle).normalize();
     (G.power > 0 ? [-.09, 0, .09] : [0]).forEach(a => {
       const v = base.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), a).multiplyScalar(65);
@@ -404,22 +501,31 @@
 
   // ---------- Update ----------
   function update(dt, t) {
-    fwd.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
-    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    const f2 = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    fwd.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const f2 = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
 
     if (G.mode === 'play') {
       // pohyb
       const mv = new THREE.Vector3();
       if (keys.w) mv.add(f2); if (keys.s) mv.sub(f2);
       if (keys.d) mv.add(right); if (keys.a) mv.sub(right);
-      const moving = mv.lengthSq() > 0;
-      if (moving) pl.p.addScaledVector(mv.normalize(), 9 * dt);
-      const r = Math.hypot(pl.p.x, pl.p.z);
-      if (r > 105) pl.p.multiplyScalar(105 / r);
-      const gh = H(pl.p.x, pl.p.z);
-      pl.vy -= 16 * dt; pl.p.y += pl.vy * dt;
-      if (pl.p.y <= gh) { pl.p.y = gh; pl.vy = 0; if (keys[' ']) pl.vy = 8; }
+      const moving = mv.lengthSq() > 0; pl.moving = moving;
+      if (moving) mv.normalize();
+      pl.dashCd = Math.max(0, pl.dashCd - dt); pl.dashT = Math.max(0, pl.dashT - dt);
+      if (keys.Shift && !pl.shiftHeld && pl.dashCd <= 0) { pl.dashDir.copy(moving ? mv : f2); pl.dashT = .2; pl.dashCd = 1.1; if (pl.vy < 0) pl.vy = 0; sfx('dash'); }
+      pl.shiftHeld = !!keys.Shift;
+      if (pl.dashT > 0) pl.p.addScaledVector(pl.dashDir, 34 * dt); else if (moving) pl.p.addScaledVector(mv, 10 * dt);
+      const r = Math.hypot(pl.p.x, pl.p.z); if (r > 105) pl.p.multiplyScalar(105 / r);
+      solidPush(pl.p, pl.p.y);
+      const onGround = pl.p.y <= floorAt(pl.p.x, pl.p.z, pl.p.y, -1) + .05 && pl.vy <= 0;
+      if (onGround) pl.jumps = 0; else if (pl.jumps === 0) pl.jumps = 1;
+      if (keys[' '] && !pl.jumpHeld && pl.jumps < 2) { pl.vy = pl.jumps ? 11.5 : 14.5; pl.jumps++; sfx('jump'); }
+      pl.jumpHeld = !!keys[' '];
+      const yPrev = pl.p.y;
+      pl.vy = Math.max(-30, pl.vy - (pl.dashT > 0 ? 3 : 20) * dt); pl.p.y += pl.vy * dt;
+      const fl = floorAt(pl.p.x, pl.p.z, yPrev, pl.vy);
+      if (pl.p.y <= fl && pl.vy <= 0) { pl.p.y = fl; pl.vy = 0; }
       animPlayer(dt, moving, t);
       pl.cd -= dt; G.power = Math.max(0, (G.power || 0) - dt);
       if (firing && pl.cd <= 0) shoot();
@@ -445,12 +551,12 @@
             list.sh.push({ m, v, life: 4 });
           }
         }
-        p.x += d.x * e.T.sp * dir * dt; p.z += d.z * e.T.sp * dir * dt;
+        p.x += d.x * e.T.sp * dir * dt; p.z += d.z * e.T.sp * dir * dt; solidPush(p, H(p.x, p.z));
         p.y = H(p.x, p.z) + Math.abs(Math.sin(t * 6 + e.ph)) * .25 * e.T.s + (e.T.hover || 0);
         e.g.rotation.y = Math.atan2(d.x, d.z); e.born = Math.min(1, e.born + dt * 1.6); e.g.scale.setScalar(e.T.s * Math.max(.01, 1 - Math.pow(1 - e.born, 3)));
         if (e.anim) e.anim(t);
         e.cd -= e.type === 'spitter' ? 0 : dt;
-        if (e.T.dmg && dist < 1.3 * e.T.s + .8 && e.cd <= 0) { e.cd = 1; hurt(e.T.dmg); }
+        if (e.T.dmg && dist < 1.3 * e.T.s + .8 && pl.p.y - p.y < 2.2 * e.T.s + 1 && e.cd <= 0) { e.cd = 1; hurt(e.T.dmg); }
         if (e.flash > 0) { e.flash -= dt; e.mats.forEach(m => m.emissive.setHex(e.flash > 0 ? 0xffffff : m.userData.e)); }
       }
 
@@ -489,20 +595,29 @@
 
     // postava + kamera za zády
     P.position.copy(pl.p); sun.position.set(pl.p.x + 50, pl.p.y + 70, pl.p.z + 25); sun.target.position.copy(pl.p); sun.target.updateMatrixWorld();
-    P.rotation.y = yaw + Math.PI;
-    const target = tmp.set(pl.p.x, pl.p.y + 2, pl.p.z).addScaledVector(right, .9);
-    camera.position.copy(target).addScaledVector(fwd, -6.5);
-    camera.position.y = Math.max(camera.position.y, H(camera.position.x, camera.position.z) + .6);
-    camera.lookAt(camera.position.clone().add(fwd));
+    P.rotation.y = Math.PI - yaw;
+    camera.position.set(pl.p.x, pl.p.y + 2.5 + (pl.moving ? Math.sin(pl.walk * 2) * .06 : 0), pl.p.z);
+    camera.lookAt(camera.position.x + fwd.x, camera.position.y + fwd.y, camera.position.z + fwd.z);
+    camera.fov += ((pl.dashT > 0 ? 98 : 78) - camera.fov) * Math.min(1, dt * 10); camera.updateProjectionMatrix();
+    vm.position.set(.32 + (pl.moving ? Math.sin(pl.walk) * .012 : 0), -.3 - (pl.moving ? Math.abs(Math.sin(pl.walk)) * .015 : 0), -.7 + pl.recoil * .1); vm.rotation.x = pl.recoil * .1;
   }
 
   // ---------- Ovládání ----------
   addEventListener('keydown', e => { keys[e.key.length === 1 ? e.key.toLowerCase() : e.key] = true; if (e.key === ' ') e.preventDefault(); });
   addEventListener('keyup', e => keys[e.key.length === 1 ? e.key.toLowerCase() : e.key] = false);
+  let invX = false, invY = false;
+  try { invX = localStorage.getItem('mx') === '1'; invY = localStorage.getItem('my') === '1'; } catch (_) {}
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (k === 'x') { invX = !invX; try { localStorage.setItem('mx', invX ? '1' : '0'); } catch (_) {} banner('Myš vodorovně: ' + (invX ? 'obráceně' : 'normálně')); }
+    if (k === 'y') { invY = !invY; try { localStorage.setItem('my', invY ? '1' : '0'); } catch (_) {} banner('Myš svisle: ' + (invY ? 'obráceně' : 'normálně')); }
+    if (k === 'm') muteMusic();
+  });
   addEventListener('mousemove', e => {
     if (!locked) return;
-    yaw += e.movementX * .0025;
-    pitch = THREE.MathUtils.clamp(pitch - e.movementY * .0025, -.9, .6);
+    yaw += e.movementX * .0025 * (invX ? -1 : 1);
+    pitch = THREE.MathUtils.clamp(pitch - e.movementY * .0025 * (invY ? -1 : 1), -1.4, 1.4);
   });
   addEventListener('mousedown', e => { if (locked && e.button === 0) firing = true; });
   addEventListener('mouseup', () => firing = false);
